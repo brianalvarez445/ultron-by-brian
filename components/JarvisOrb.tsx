@@ -20,8 +20,41 @@ export default function JarvisOrb() {
   const trackerRef = useRef<HandTracker | null>(null);
 
   const [camera, setCamera] = useState<CameraState>("off");
-  const [status, setStatus] = useState<TrackerStatus>({ hands: 0, mode: "idle" });
-  const [error, setError] = useState<string | null>(null);
+const [status, setStatus] = useState<TrackerStatus>({ hands: 0, mode: "idle" });
+const [error, setError] = useState<string | null>(null);
+
+const speak = useCallback((text: string) => {
+  console.log("SPEAK CALLED", text);
+
+  const synth = window.speechSynthesis;
+
+  const startSpeak = () => {
+    synth.cancel();
+
+    const voice = new SpeechSynthesisUtterance(text);
+    const voices = synth.getVoices();
+
+    if (voices.length > 0) {
+      voice.voice = voices[0];
+    }
+
+    voice.rate = 1;
+    voice.pitch = 0.8;
+    voice.volume = 1;
+
+    voice.onstart = () => console.log("VOICE STARTED");
+    voice.onend = () => console.log("VOICE FINISHED");
+    voice.onerror = (e) => console.log("VOICE ERROR", e);
+
+    synth.speak(voice);
+  };
+
+  if (synth.getVoices().length === 0) {
+    synth.onvoiceschanged = startSpeak;
+  } else {
+    startSpeak();
+  }
+}, []);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -170,7 +203,7 @@ export default function JarvisOrb() {
             RESET
           </button>
         </div>
-      </div>
+              <div className="hud-row"><button type="button" className="hud-btn" onClick={() => speak("Hello ALVAAREZ. I am Ultron. Systems are online.")}>TALK</button></div></div>
     </>
   );
 }
