@@ -22,6 +22,9 @@ export default function JarvisOrb() {
   const [camera, setCamera] = useState<CameraState>("off");
 const [status, setStatus] = useState<TrackerStatus>({ hands: 0, mode: "idle" });
 const [error, setError] = useState<string | null>(null);
+const [listening, setListening] = useState(false);
+
+const recognitionRef = useRef<any>(null);
 
 const speak = useCallback((text: string) => {
   console.log("SPEAK CALLED", text);
@@ -29,8 +32,6 @@ const speak = useCallback((text: string) => {
   const synth = window.speechSynthesis;
 
   const startSpeak = () => {
-    synth.cancel();
-
     const voice = new SpeechSynthesisUtterance(text);
     const voices = synth.getVoices();
 
@@ -110,7 +111,71 @@ const speak = useCallback((text: string) => {
     if (trackerRef.current) stopGestures();
     else void startGestures();
   }, [startGestures, stopGestures]);
+const talkToUltron = async (message: string) => {
+  ...
+};
+const startListening = () => {
+  const SpeechRecognition =
+    (window as any).SpeechRecognition ||
+    (window as any).webkitSpeechRecognition;
 
+  if (!SpeechRecognition) {
+    alert("Speech Recognition is not supported in this browser.");
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+
+  recognition.lang = "en-US";
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+
+  recognition.onstart = () => {
+    console.log("🎤 Listening...");
+    setListening(true);
+  };
+
+  recognition.onend = () => {
+    console.log("🛑 Listening stopped");
+    setListening(false);
+  };
+
+  recognition.onerror = (event: any) => {
+    console.error(event);
+    setListening(false);
+  };
+
+  recognition.onresult = (event: any) => {
+    const transcript = event.results[0][0].transcript;
+
+    console.log("You said:", transcript);
+
+    talkToUltron(transcript);
+  };
+
+  recognition.start();
+};
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        message,
+      }),
+    });
+
+    if (!res.ok) {
+      throw new Error(`Server returned ${res.status}`);
+    }
+
+    const data = await res.json();
+    speak(data.reply);
+  } catch (err) {
+    console.error("ULTRON fetch failed:", err);
+  }
+};
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       switch (e.key) {
@@ -203,7 +268,18 @@ const speak = useCallback((text: string) => {
             RESET
           </button>
         </div>
-              <div className="hud-row"><button type="button" className="hud-btn" onClick={() => speak("Hello ALVAAREZ. I am Ultron. Systems are online.")}>TALK</button></div></div>
-    </>
+              <div className="hud-row">
+  <button
+    type="button"
+    className="hud-btn"
+    onClick={startListening}
+>
+    {listening ? "LISTENING..." : "LISTEN"}
+</button>
+</div>
+
+</div>
+
+</>  
   );
 }
