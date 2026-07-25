@@ -112,7 +112,28 @@ const speak = useCallback((text: string) => {
     else void startGestures();
   }, [startGestures, stopGestures]);
 const talkToUltron = async (message: string) => {
-  ...
+  console.log("ULTRON received:", message);
+
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        message,
+      }),
+    });
+
+    if (!res.ok) {
+      throw new Error(`Server returned ${res.status}`);
+    }
+
+    const data = await res.json();
+    speak(data.reply);
+  } catch (err) {
+    console.error("ULTRON fetch failed:", err);
+  }
 };
 const startListening = () => {
   const SpeechRecognition =
@@ -155,27 +176,7 @@ const startListening = () => {
 
   recognition.start();
 };
-  try {
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        message,
-      }),
-    });
 
-    if (!res.ok) {
-      throw new Error(`Server returned ${res.status}`);
-    }
-
-    const data = await res.json();
-    speak(data.reply);
-  } catch (err) {
-    console.error("ULTRON fetch failed:", err);
-  }
-};
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       switch (e.key) {
