@@ -108,9 +108,10 @@ const speak = useCallback((text: string) => {
   }, []);
 
   const toggleGestures = useCallback(() => {
-    if (trackerRef.current) stopGestures();
-    else void startGestures();
-  }, [startGestures, stopGestures]);
+  if (trackerRef.current) stopGestures();
+  else void startGestures();
+}, [startGestures, stopGestures]);
+
 const talkToUltron = async (message: string) => {
   console.log("ULTRON received:", message);
 
@@ -130,7 +131,6 @@ const talkToUltron = async (message: string) => {
     if (!res.ok) {
       throw new Error(`Server returned ${res.status}`);
     }
-
     const data = await res.json();
 
     console.timeEnd("ULTRON");
