@@ -15,6 +15,8 @@ const MODE_LABEL: Record<TrackerStatus["mode"], string> = {
 export default function JarvisOrb() {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const screenVideoRef = useRef<HTMLVideoElement>(null);
+const screenStreamRef = useRef<MediaStream | null>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<OrbSceneApi | null>(null);
   const trackerRef = useRef<HandTracker | null>(null);
@@ -23,6 +25,7 @@ export default function JarvisOrb() {
 const [status, setStatus] = useState<TrackerStatus>({ hands: 0, mode: "idle" });
 const [error, setError] = useState<string | null>(null);
 const [listening, setListening] = useState(false);
+const [sharingScreen, setSharingScreen] = useState(false);
 
 const recognitionRef = useRef<any>(null);
 
@@ -55,6 +58,7 @@ const speak = useCallback((text: string) => {
   } else {
     startSpeak();
   }
+
 }, []);
 
   useEffect(() => {
@@ -141,10 +145,41 @@ const talkToUltron = async (message: string) => {
     console.error("ULTRON fetch failed:", err);
   }
 };
+const startScreenShare = async () => {
+  try {
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      video: true,
+      audio: false,
+    });
+
+    screenStreamRef.current = stream;
+
+    if (screenVideoRef.current) {
+      screenVideoRef.current.srcObject = stream;
+      await screenVideoRef.current.play();
+    }
+
+    setSharingScreen(true);
+
+    stream.getVideoTracks()[0].onended = () => {
+      setSharingScreen(false);
+      screenStreamRef.current = null;
+
+      if (screenVideoRef.current) {
+        screenVideoRef.current.srcObject = null;
+      }
+    };
+  } catch (err) {
+    console.error("Screen sharing failed:", err);
+  }
+};
+
 const startListening = () => {
   const SpeechRecognition =
     (window as any).SpeechRecognition ||
     (window as any).webkitSpeechRecognition;
+
+  // ...rest of your listening code...
 
   if (!SpeechRecognition) {
     alert("Speech Recognition is not supported in this browser.");
@@ -174,13 +209,34 @@ const startListening = () => {
   setListening(false);
 };
 
-  recognition.onresult = (event: any) => {
-    const transcript = event.results[0][0].transcript;
+ recognition.onresult = (event: any) => {
+  const transcript = event.results[0][0].transcript;
+  const command = transcript.toLowerCase();
 
-    console.log("You said:", transcript);
+  console.log("RAW TRANSCRIPT:", transcript);
+  console.log("LOWERCASE:", command);
 
-    talkToUltron(transcript);
-  };
+  if (command.includes("open youtube")) {
+    const search = command.replace("open youtube", "").trim();
+
+    console.log("SEARCH:", search);
+
+    if (search.length > 0) {
+      speak(`Searching YouTube for ${search}`);
+      window.open(
+        `https://www.youtube.com/results?search_query=${encodeURIComponent(search)}`,
+        "_blank"
+      );
+    } else {
+      speak("Opening YouTube.");
+      window.open("https://www.youtube.com", "_blank");
+    }
+
+    return;
+  }
+
+  talkToUltron(transcript);
+};
 
   recognition.start();
 };
@@ -284,6 +340,13 @@ const startListening = () => {
     onClick={startListening}
 >
     {listening ? "LISTENING..." : "LISTEN"}
+</button>
+<button
+  type="button"
+  className="hud-btn"
+  onClick={startScreenShare}
+>
+  {sharingScreen ? "SHARING SCREEN" : "SHARE SCREEN"}
 </button>
 </div>
 
