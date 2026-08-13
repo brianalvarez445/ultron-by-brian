@@ -128,8 +128,9 @@ const talkToUltron = async (message: string) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        message,
-      }),
+  message,
+  image: sharingScreen ? captureScreen() : null,
+}),
     });
 
     if (!res.ok) {
@@ -161,6 +162,7 @@ const startScreenShare = async () => {
 
     setSharingScreen(true);
 
+
     stream.getVideoTracks()[0].onended = () => {
       setSharingScreen(false);
       screenStreamRef.current = null;
@@ -173,7 +175,36 @@ const startScreenShare = async () => {
     console.error("Screen sharing failed:", err);
   }
 };
+const captureScreen = (): string | null => {
+  const video = screenVideoRef.current;
 
+  if (!video) {
+  console.log("SCREEN VIDEO MISSING");
+  return null;
+}
+
+console.log("SCREEN VIDEO STATE:", {
+  readyState: video.readyState,
+  videoWidth: video.videoWidth,
+  videoHeight: video.videoHeight,
+  paused: video.paused,
+});
+
+  const canvas = document.createElement("canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+
+  const ctx = canvas.getContext("2d");
+
+  if (!ctx) {
+    console.log("CANVAS FAILED");
+    return null;
+  }
+
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  return canvas.toDataURL("image/jpeg", 0.8);
+};
 const startListening = () => {
   const SpeechRecognition =
     (window as any).SpeechRecognition ||
@@ -301,6 +332,20 @@ const startListening = () => {
         <div className={`camera-panel${cameraOn ? " visible" : ""}`}>
           {/* Mirrored preview so it behaves like a mirror */}
           <video ref={videoRef} muted playsInline className="camera-video" />
+
+<video
+  ref={screenVideoRef}
+  muted
+  playsInline
+  style={{ display: "none" }}
+/>
+
+<canvas
+  ref={overlayRef}
+  width={208}
+  height={156}
+  className="camera-overlay"
+/>
           <canvas ref={overlayRef} width={208} height={156} className="camera-overlay" />
           <div className="camera-status">
             {status.hands > 0

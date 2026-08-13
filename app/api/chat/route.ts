@@ -1,6 +1,8 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
+
 console.log("GROQ KEY EXISTS:", !!process.env.GROQ_API_KEY);
+
 const groq = new OpenAI({
   apiKey: process.env.GROQ_API_KEY,
   baseURL: "https://api.groq.com/openai/v1",
@@ -8,10 +10,13 @@ const groq = new OpenAI({
 
 export async function POST(req: Request) {
   try {
-    const { message } = await req.json();
+    const { message, image } = await req.json();
 
     const response = await groq.chat.completions.create({
-      model: "llama-3.1-8b-instant",
+      model: image
+        ? "meta-llama/llama-4-scout-17b-16e-instruct"
+        : "llama-3.1-8b-instant",
+
       messages: [
         {
           role: "system",
@@ -25,11 +30,24 @@ Only answer the user's request.
 Do not end responses with lines like "Human interaction complete",
 "Awaiting further instructions", or similar unless the user specifically asks.
 Keep responses concise unless more detail is requested.
-`
+`,
         },
         {
           role: "user",
-          content: message,
+          content: image
+            ? [
+                {
+                  type: "text",
+                  text: message,
+                },
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: image,
+                  },
+                },
+              ]
+            : message,
         },
       ],
     });
