@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createOrbScene, type OrbSceneApi } from "@/lib/orbScene";
 import { HandTracker, type TrackerStatus } from "@/lib/handTracker";
+import { parseBrowserCommand } from "@/lib/commands";
+import { executeBrowserAction } from "@/lib/browser";
 
 type CameraState = "off" | "starting" | "on" | "error";
 
@@ -34,31 +36,25 @@ const speak = useCallback((text: string) => {
 
   const synth = window.speechSynthesis;
 
-  const startSpeak = () => {
-    const voice = new SpeechSynthesisUtterance(text);
-    const voices = synth.getVoices();
+  synth.cancel();
 
-    if (voices.length > 0) {
-      voice.voice = voices[0];
-    }
+  const voice = new SpeechSynthesisUtterance(text);
 
-    voice.rate = 1;
-    voice.pitch = 0.8;
-    voice.volume = 1;
+  const voices = synth.getVoices();
 
-    voice.onstart = () => console.log("VOICE STARTED");
-    voice.onend = () => console.log("VOICE FINISHED");
-    voice.onerror = (e) => console.log("VOICE ERROR", e);
-
-    synth.speak(voice);
-  };
-
-  if (synth.getVoices().length === 0) {
-    synth.onvoiceschanged = startSpeak;
-  } else {
-    startSpeak();
+  if (voices.length > 0) {
+    voice.voice = voices[0];
   }
 
+  voice.rate = 1;
+  voice.pitch = 0.8;
+  voice.volume = 1;
+
+  voice.onstart = () => console.log("VOICE STARTED");
+  voice.onend = () => console.log("VOICE FINISHED");
+  voice.onerror = (e) => console.log("VOICE ERROR", e);
+
+  synth.speak(voice);
 }, []);
 
   useEffect(() => {
@@ -122,16 +118,24 @@ const talkToUltron = async (message: string) => {
   console.time("ULTRON");
 
   try {
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-  message,
-  image: sharingScreen ? captureScreen() : null,
-}),
-    });
+  const needsVision =
+    sharingScreen &&
+    (
+      message.toLowerCase().includes("screen") ||
+      message.toLowerCase().includes("see") ||
+      message.toLowerCase().includes("look")
+    );
+
+  const res = await fetch("/api/chat", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      message,
+      image: needsVision ? captureScreen() : null,
+    }),
+  });
 
     if (!res.ok) {
       throw new Error(`Server returned ${res.status}`);
@@ -140,7 +144,12 @@ const talkToUltron = async (message: string) => {
 
     console.timeEnd("ULTRON");
 
-    speak(data.reply);
+    const cleanReply = data.reply.replace(
+  /<think>[\s\S]*?<\/think>/g,
+  ""
+);
+
+speak(cleanReply);
   } catch (err) {
     console.timeEnd("ULTRON");
     console.error("ULTRON fetch failed:", err);
@@ -247,26 +256,26 @@ const startListening = () => {
   console.log("RAW TRANSCRIPT:", transcript);
   console.log("LOWERCASE:", command);
 
-  if (command.includes("open youtube")) {
-    const search = command.replace("open youtube", "").trim();
+const browserAction = parseBrowserCommand(transcript);
 
-    console.log("SEARCH:", search);
+if (browserAction) {
+  console.log("BROWSER ACTION:", browserAction);
 
-    if (search.length > 0) {
-      speak(`Searching YouTube for ${search}`);
-      window.open(
-        `https://www.youtube.com/results?search_query=${encodeURIComponent(search)}`,
-        "_blank"
-      );
-    } else {
-      speak("Opening YouTube.");
-      window.open("https://www.youtube.com", "_blank");
-    }
+  executeBrowserAction(browserAction);
 
-    return;
+  if (browserAction.type === "search") {
+    speak(
+      `Searching ${browserAction.engine} for ${browserAction.query}`
+    );
+  } else {
+    speak(`Opening ${browserAction.target}`);
   }
 
-  talkToUltron(transcript);
+  return;
+}
+
+talkToUltron(transcript);
+
 };
 
   recognition.start();

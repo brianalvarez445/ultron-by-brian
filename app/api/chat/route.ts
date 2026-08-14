@@ -14,7 +14,7 @@ export async function POST(req: Request) {
 
     const response = await groq.chat.completions.create({
       model: image
-        ? "meta-llama/llama-4-scout-17b-16e-instruct"
+        ? "qwen/qwen3.6-27b"
         : "llama-3.1-8b-instant",
 
       messages: [

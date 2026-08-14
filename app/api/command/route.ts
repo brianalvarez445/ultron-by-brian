@@ -1,17 +1,30 @@
 import { NextResponse } from "next/server";
-import { executeCommand, UltronCommand } from "@/lib/commands";
+import { parseBrowserCommand } from "@/lib/commands";
 
 export async function POST(req: Request) {
   try {
-    const { command } = await req.json();
+    const { message } = await req.json();
 
-    console.log("ULTRON COMMAND:", command);
+    if (typeof message !== "string" || !message.trim()) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Message is required",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
 
-    await executeCommand(command as UltronCommand);
+    const action = parseBrowserCommand(message);
+
+    console.log("ULTRON BROWSER COMMAND:", message);
+    console.log("PARSED ACTION:", action);
 
     return NextResponse.json({
       success: true,
-      command,
+      action,
     });
   } catch (error) {
     console.error("COMMAND ERROR:", error);
@@ -19,7 +32,7 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         success: false,
-        error: "Command execution failed",
+        error: "Command parsing failed",
       },
       {
         status: 500,
