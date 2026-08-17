@@ -25,8 +25,8 @@ const conversationHistory = memory
 
     const response = await groq.chat.completions.create({
       model: image
-        ? "qwen/qwen3.6-27b"
-        : "llama-3.1-8b-instant",
+  ? "qwen/qwen3.6-27b"
+  : "openai/gpt-oss-20b",
 
       messages: [
   {

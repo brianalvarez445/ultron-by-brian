@@ -27,6 +27,7 @@ const screenStreamRef = useRef<MediaStream | null>(null);
 const [status, setStatus] = useState<TrackerStatus>({ hands: 0, mode: "idle" });
 const [error, setError] = useState<string | null>(null);
 const [listening, setListening] = useState(false);
+const [awaitingCommand, setAwaitingCommand] = useState(false);
 const [sharingScreen, setSharingScreen] = useState(false);
 
 const recognitionRef = useRef<any>(null);
@@ -248,34 +249,52 @@ const startListening = () => {
 
   setListening(false);
 };
-
- recognition.onresult = (event: any) => {
+recognition.onresult = (event: any) => {
   const transcript = event.results[0][0].transcript;
-  const command = transcript.toLowerCase();
+  const command = transcript.toLowerCase().trim();
 
   console.log("RAW TRANSCRIPT:", transcript);
   console.log("LOWERCASE:", command);
 
-const browserAction = parseBrowserCommand(transcript);
+  if (!awaitingCommand && command === "ultron") {
+    setAwaitingCommand(true);
 
-if (browserAction) {
-  console.log("BROWSER ACTION:", browserAction);
+    speak("Yes?");
 
-  executeBrowserAction(browserAction);
+    setTimeout(() => {
+      startListening();
+    }, 1000);
 
-  if (browserAction.type === "search") {
-    speak(
-      `Searching ${browserAction.engine} for ${browserAction.query}`
-    );
-  } else {
-    speak(`Opening ${browserAction.target}`);
+    return;
   }
 
-  return;
-}
+  if (awaitingCommand) {
+    setAwaitingCommand(false);
 
-talkToUltron(transcript);
+    const browserAction = parseBrowserCommand(transcript);
 
+    if (browserAction) {
+      console.log("BROWSER ACTION:", browserAction);
+
+      executeBrowserAction(browserAction);
+
+      if (browserAction.type === "search") {
+        speak(
+          `Searching ${browserAction.engine} for ${browserAction.query}`
+        );
+      } else {
+        speak(`Opening ${browserAction.target}`);
+      }
+
+      return;
+    }
+
+    talkToUltron(transcript);
+
+    return;
+  }
+
+  talkToUltron(transcript);
 };
 
   recognition.start();
