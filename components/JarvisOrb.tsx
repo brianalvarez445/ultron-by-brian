@@ -27,12 +27,33 @@ const screenStreamRef = useRef<MediaStream | null>(null);
 const [status, setStatus] = useState<TrackerStatus>({ hands: 0, mode: "idle" });
 const [error, setError] = useState<string | null>(null);
 const [listening, setListening] = useState(false);
-const [awaitingCommand, setAwaitingCommand] = useState(false);
+const awaitingCommandRef = useRef(false);
 const [sharingScreen, setSharingScreen] = useState(false);
+const sharingScreenRef = useRef(false);
 
 const recognitionRef = useRef<any>(null);
+const speechVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+const autoListenRef = useRef(true);
 
-const speak = useCallback((text: string) => {
+useEffect(() => {
+  const loadSpeechVoice = () => {
+    const voices = window.speechSynthesis.getVoices();
+
+    if (voices.length > 0 && !speechVoiceRef.current) {
+      speechVoiceRef.current = voices[0];
+      console.log("SPEECH VOICE READY:", voices[0].name);
+    }
+  };
+
+  loadSpeechVoice();
+  window.speechSynthesis.addEventListener("voiceschanged", loadSpeechVoice);
+
+  return () => {
+    window.speechSynthesis.removeEventListener("voiceschanged", loadSpeechVoice);
+  };
+}, []);
+
+const speak = useCallback((text: string, onEnd?: () => void) => {
   console.log("SPEAK CALLED", text);
 
   const synth = window.speechSynthesis;
@@ -41,10 +62,8 @@ const speak = useCallback((text: string) => {
 
   const voice = new SpeechSynthesisUtterance(text);
 
-  const voices = synth.getVoices();
-
-  if (voices.length > 0) {
-    voice.voice = voices[0];
+  if (speechVoiceRef.current) {
+    voice.voice = speechVoiceRef.current;
   }
 
   voice.rate = 1;
@@ -52,7 +71,15 @@ const speak = useCallback((text: string) => {
   voice.volume = 1;
 
   voice.onstart = () => console.log("VOICE STARTED");
-  voice.onend = () => console.log("VOICE FINISHED");
+
+  voice.onend = () => {
+    console.log("VOICE FINISHED");
+
+    if (onEnd) {
+      onEnd();
+    }
+  };
+
   voice.onerror = (e) => console.log("VOICE ERROR", e);
 
   synth.speak(voice);
@@ -171,10 +198,12 @@ const startScreenShare = async () => {
     }
 
     setSharingScreen(true);
+    sharingScreenRef.current = true;
 
 
     stream.getVideoTracks()[0].onended = () => {
       setSharingScreen(false);
+      sharingScreenRef.current = false;
       screenStreamRef.current = null;
 
       if (screenVideoRef.current) {
@@ -220,56 +249,73 @@ const startListening = () => {
     (window as any).SpeechRecognition ||
     (window as any).webkitSpeechRecognition;
 
-  // ...rest of your listening code...
-
   if (!SpeechRecognition) {
     alert("Speech Recognition is not supported in this browser.");
     return;
   }
 
+  if (recognitionRef.current) {
+    try {
+      recognitionRef.current.stop();
+    } catch {}
+    recognitionRef.current = null;
+  }
+
   const recognition = new SpeechRecognition();
+  recognitionRef.current = recognition;
+
+  const commandMode = awaitingCommandRef.current;
 
   recognition.lang = "en-US";
   recognition.interimResults = false;
-  recognition.maxAlternatives = 1;
+  recognition.continuous = false;
+  recognition.maxAlternatives = 3;
 
   recognition.onstart = () => {
-    console.log("🎤 Listening...");
+    console.log(
+      commandMode
+        ? "🎤 COMMAND LISTENING..."
+        : "👂 ULTRON WAKE LISTENING..."
+    );
     setListening(true);
   };
 
-  recognition.onend = () => {
-    console.log("🛑 Listening stopped");
-    setListening(false);
-  };
+  recognition.onresult = (event: any) => {
+    const transcript = event.results[0][0].transcript;
+    const command = transcript.toLowerCase().trim();
 
-  recognition.onerror = (event: any) => {
-  console.error("Speech recognition error:", event.error);
-  console.error(event);
+    console.log("RAW TRANSCRIPT:", transcript);
+    console.log("LOWERCASE:", command);
 
-  setListening(false);
-};
-recognition.onresult = (event: any) => {
-  const transcript = event.results[0][0].transcript;
-  const command = transcript.toLowerCase().trim();
+    if (!commandMode) {
+      const wakeWords = ["ultron", "voldron", "voltron"];
 
-  console.log("RAW TRANSCRIPT:", transcript);
-  console.log("LOWERCASE:", command);
+      const heardWakeWord =
+        wakeWords.some((word) => command === word) ||
+        wakeWords.some((word) => command.startsWith(word + " "));
 
-  if (!awaitingCommand && command === "ultron") {
-    setAwaitingCommand(true);
+      if (!heardWakeWord) {
+        console.log("💤 Not the wake word");
+        return;
+      }
 
-    speak("Yes?");
+      awaitingCommandRef.current = true;
+      console.log("🟢 ULTRON WAKE WORD DETECTED");
 
-    setTimeout(() => {
-      startListening();
-    }, 1000);
+      speak("Yes?", () => {
+        console.log("🟢 ULTRON READY FOR COMMAND");
 
-    return;
-  }
+        setTimeout(() => {
+          if (awaitingCommandRef.current) {
+            startListening();
+          }
+        }, 250);
+      });
 
-  if (awaitingCommand) {
-    setAwaitingCommand(false);
+      return;
+    }
+
+    awaitingCommandRef.current = false;
 
     const browserAction = parseBrowserCommand(transcript);
 
@@ -290,15 +336,132 @@ recognition.onresult = (event: any) => {
     }
 
     talkToUltron(transcript);
+  };
+
+  recognition.onerror = (event: any) => {
+    console.error("Speech recognition error:", event.error);
+    setListening(false);
+  };
+
+  recognition.onend = () => {
+    console.log("🛑 Listening stopped");
+    setListening(false);
+    recognitionRef.current = null;
 
     return;
+  };
+
+  try {
+    recognition.start();
+  } catch (err) {
+    console.error("Could not start speech recognition:", err);
+    recognitionRef.current = null;
+    setListening(false);
   }
-
-  talkToUltron(transcript);
 };
 
-  recognition.start();
-};
+  useEffect(() => {
+    let lastWakeTimestamp = 0;
+    let lastCommandTimestamp = 0;
+    let stopped = false;
+
+    const checkForWake = async () => {
+      try {
+        const res = await fetch("/api/wake", {
+          cache: "no-store",
+        });
+
+        if (!res.ok || stopped) return;
+
+        const data = await res.json();
+
+        if (
+          data.wake === true &&
+          Number(data.timestamp) > lastWakeTimestamp
+        ) {
+          lastWakeTimestamp = Number(data.timestamp);
+
+          console.log("🔥 PYTHON WAKE DETECTED");
+          console.log("🟢 ULTRON STARTING LISTENING");
+
+          console.log("🎤 PYTHON OWNS MICROPHONE — BROWSER LISTENER SKIPPED");
+        }
+
+        if (
+          data.command &&
+          Number(data.commandTimestamp) > lastCommandTimestamp
+        ) {
+          lastCommandTimestamp = Number(data.commandTimestamp);
+
+          console.log("🌐 PYTHON COMMAND RECEIVED:", data.command);
+
+          const action = parseBrowserCommand(data.command);
+
+          console.log("🧪 PARSED PYTHON COMMAND:", action);
+
+          if (action) {
+            console.log("🌐 EXECUTING BROWSER ACTION:", action);
+            executeBrowserAction(action);
+          } else {
+            console.log("🧠 NORMAL COMMAND — SENDING TO ULTRON:", data.command);
+
+            const needsVision = sharingScreenRef.current;
+
+const screenImage = needsVision ? captureScreen() : null;
+
+            console.log("👁️ PYTHON COMMAND NEEDS VISION:", needsVision);
+            console.log("🖼️ SCREEN IMAGE CAPTURED:", !!screenImage);
+
+            try {
+              console.log("👁️ SENDING SCREEN IMAGE TO /api/chat:", {
+                command: data.command,
+                hasImage: !!screenImage,
+                imageLength: screenImage ? screenImage.length : 0,
+              });
+
+              const visionResponse = await fetch("/api/chat", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  message: data.command,
+                  image: screenImage,
+                }),
+              });
+
+              if (!visionResponse.ok) {
+                throw new Error(`Vision request failed: ${visionResponse.status}`);
+              }
+
+              const visionData = await visionResponse.json();
+              const cleanReply = visionData.reply.replace(
+                /<think>[\s\S]*?<\/think>/g,
+                ""
+              );
+
+              speak(cleanReply);
+            } catch (visionError) {
+              console.error("❌ PYTHON → VISION FAILED:", visionError);
+            }
+          }
+        }
+      } catch (error) {
+        if (!stopped) {
+          console.error("Wake bridge error:", error);
+        }
+      }
+    };
+
+    checkForWake();
+
+    const interval = setInterval(checkForWake, 500);
+
+    return () => {
+      stopped = true;
+      clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
