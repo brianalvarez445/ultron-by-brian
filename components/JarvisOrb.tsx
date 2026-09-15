@@ -31,6 +31,13 @@ const awaitingCommandRef = useRef(false);
 const [sharingScreen, setSharingScreen] = useState(false);
 const sharingScreenRef = useRef(false);
 
+const sentinelActiveRef = useRef(false);
+const sentinelTimerRef = useRef<number | null>(null);
+const sentinelBusyRef = useRef(false);
+const sentinelLastSignatureRef = useRef<string | null>(null);
+const sentinelLastAlertRef = useRef(0);
+const sentinelInstructionRef = useRef("Watch my screen and warn me only when you detect a clear, high-confidence mistake.");
+
 const recognitionRef = useRef<any>(null);
 const speechVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
 const autoListenRef = useRef(true);
@@ -91,6 +98,7 @@ const speak = useCallback((text: string, onEnd?: () => void) => {
     const scene = createOrbScene(container);
     sceneRef.current = scene;
     return () => {
+      stopSentinel();
       trackerRef.current?.stop();
       trackerRef.current = null;
       scene.dispose();
@@ -139,6 +147,178 @@ const speak = useCallback((text: string, onEnd?: () => void) => {
   if (trackerRef.current) stopGestures();
   else void startGestures();
 }, [startGestures, stopGestures]);
+
+const getScreenSignature = (): string | null => {
+  const video = screenVideoRef.current;
+
+  if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+    return null;
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = 32;
+  canvas.height = 18;
+
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+  if (!ctx) return null;
+
+  ctx.drawImage(video, 0, 0, 32, 18);
+
+  const pixels = ctx.getImageData(0, 0, 32, 18).data;
+  let signature = "";
+
+  for (let i = 0; i < pixels.length; i += 16) {
+    const r = pixels[i];
+    const g = pixels[i + 1];
+    const b = pixels[i + 2];
+    const brightness = Math.round((r + g + b) / 3 / 32);
+    signature += brightness.toString(16);
+  }
+
+  return signature;
+};
+
+const screenChangedMeaningfully = (
+  previous: string | null,
+  current: string,
+): boolean => {
+  if (!previous) return true;
+
+  const length = Math.min(previous.length, current.length);
+  if (!length) return true;
+
+  let different = 0;
+
+  for (let i = 0; i < length; i++) {
+    if (previous[i] !== current[i]) {
+      different++;
+    }
+  }
+
+  return different / length >= 0.08;
+};
+
+const stopSentinel = useCallback(() => {
+  sentinelActiveRef.current = false;
+  sentinelBusyRef.current = false;
+  sentinelLastSignatureRef.current = null;
+
+  if (sentinelTimerRef.current !== null) {
+    window.clearInterval(sentinelTimerRef.current);
+    sentinelTimerRef.current = null;
+  }
+
+  console.log("🛑 ULTRON SENTINEL STOPPED");
+}, []);
+
+const sentinelLastAlertTextRef = useRef<string | null>(null);
+
+const analyzeSentinelFrame = useCallback(async (image: string) => {
+  if (sentinelBusyRef.current) return;
+
+  sentinelBusyRef.current = true;
+
+  try {
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        mode: "sentinel",
+        message: sentinelInstructionRef.current,
+        image,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Sentinel request failed: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    const reply = String(data.reply || "")
+      .replace(/<think>[\s\S]*?<\/think>/gi, "")
+      .trim();
+
+    console.log("🛡️ SENTINEL CLEAN RESULT:", reply);
+
+    if (!reply || reply === "NO_ALERT") {
+      sentinelLastAlertTextRef.current = null;
+      console.log("🛡️ SENTINEL: no problem detected.");
+      return;
+    }
+
+    const alertText = reply.replace(/^ALERT:\s*/i, "").trim();
+
+    if (alertText === sentinelLastAlertTextRef.current) {
+      console.log("🛡️ SAME ALERT — NOT REPEATING");
+      return;
+    }
+
+    sentinelLastAlertTextRef.current = alertText;
+    speak(alertText);
+  } catch (error) {
+    console.error("❌ SENTINEL ANALYSIS FAILED:", error);
+  } finally {
+    sentinelBusyRef.current = false;
+  }
+}, [speak]);
+
+const startSentinel = useCallback(async (instruction?: string) => {
+  if (!sharingScreenRef.current || !screenStreamRef.current) {
+    console.log("🛡️ SENTINEL: screen sharing inactive — requesting it now.");
+
+    try {
+      await startScreenShare();
+    } catch (error) {
+      console.error("❌ SENTINEL COULD NOT START SCREEN SHARE:", error);
+      speak("I could not start screen sharing.");
+      return;
+    }
+
+    if (!sharingScreenRef.current || !screenStreamRef.current) {
+      console.log("🛑 SENTINEL: screen sharing was not established.");
+      return;
+    }
+  }
+
+  if (sentinelTimerRef.current !== null) {
+    window.clearInterval(sentinelTimerRef.current);
+  }
+
+  sentinelActiveRef.current = true;
+  sentinelBusyRef.current = false;
+  sentinelLastAlertTextRef.current = null;
+
+  sentinelInstructionRef.current =
+    `Watch my screen and tell me whether I'm doing everything correctly. ` +
+    `Do not read the screen aloud. Do not summarize it. ` +
+    `Only identify a clear, visible, actionable mistake or confirm that everything looks good. ` +
+    `${instruction?.trim() || ""}`;
+
+  console.log("🛡️ ULTRON SENTINEL ACTIVE");
+
+  speak("Sentinel active. I will check your screen every 15 seconds.");
+
+  sentinelTimerRef.current = window.setInterval(() => {
+    if (!sentinelActiveRef.current || !sharingScreenRef.current) {
+      stopSentinel();
+      return;
+    }
+
+    const image = captureScreen();
+
+    if (!image) {
+      console.log("🛡️ SENTINEL: no screen image available");
+      return;
+    }
+
+    console.log("🛡️ SENTINEL 15-SECOND CHECK");
+    void analyzeSentinelFrame(image);
+  }, 15000);
+}, [analyzeSentinelFrame, speak, stopSentinel]);
 
 const talkToUltron = async (message: string) => {
   console.log("ULTRON received:", message);
@@ -202,6 +382,7 @@ const startScreenShare = async () => {
 
 
     stream.getVideoTracks()[0].onended = () => {
+      stopSentinel();
       setSharingScreen(false);
       sharingScreenRef.current = false;
       screenStreamRef.current = null;
@@ -394,6 +575,28 @@ const startListening = () => {
           lastCommandTimestamp = Number(data.commandTimestamp);
 
           console.log("🌐 PYTHON COMMAND RECEIVED:", data.command);
+
+          const normalizedCommand = data.command.toLowerCase().trim();
+
+          if (
+            normalizedCommand.includes("stop watching") ||
+            normalizedCommand.includes("stop monitoring") ||
+            normalizedCommand.includes("stop sentinel")
+          ) {
+            stopSentinel();
+            speak("Sentinel monitoring stopped.");
+            return;
+          }
+
+          if (
+            normalizedCommand.includes("watch my screen") ||
+            normalizedCommand.includes("monitor my screen") ||
+            normalizedCommand.includes("watch this screen") ||
+            normalizedCommand.includes("monitor this screen")
+          ) {
+            void startSentinel(data.command);
+            return;
+          }
 
           const action = parseBrowserCommand(data.command);
 

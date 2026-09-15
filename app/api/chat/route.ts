@@ -10,18 +10,74 @@ const groq = new OpenAI({
 
 export async function POST(req: Request) {
   try {
-    const { message, image } = await req.json();
+    const { message, image, mode } = await req.json();
+
+if (mode === "sentinel" && image) {
+  const response = await groq.chat.completions.create({
+    model: "qwen/qwen3.6-27b",
+    messages: [
+      {
+        role: "system",
+        content: `
+You are ULTRON SENTINEL.
+
+You are actively monitoring the CURRENT screenshot.
+
+Do NOT read the screen aloud.
+Do NOT summarize the screen.
+Do NOT describe everything you see.
+
+Look specifically for a clear, high-confidence, actionable mistake related to the user's monitoring instruction.
+
+Only speak when there is a concrete problem that is clearly visible.
+If there is no clear problem, respond with exactly:
+NO_ALERT
+
+If there is a clear problem, respond with exactly ONE short sentence beginning with:
+ALERT:
+
+Do not invent information.
+Do not guess numbers that are not clearly visible.
+Do not recommend or execute a trade.
+`,
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: message,
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: image,
+            },
+          },
+        ],
+      },
+    ],
+  });
+
+  const reply = response.choices[0].message.content || "NO_ALERT";
+
+  return NextResponse.json({
+    reply: reply.trim(),
+  });
+}
 
 saveMemory("user", message);
 
 const memory = loadMemory();
 
-const conversationHistory = memory
-  .slice(-10)
-  .map((entry) => ({
-    role: entry.role,
-    content: entry.content,
-  }));
+const conversationHistory = image
+  ? []
+  : memory
+      .slice(-10)
+      .map((entry) => ({
+        role: entry.role,
+        content: entry.content,
+      }));
 
     const response = await groq.chat.completions.create({
       model: image
@@ -41,6 +97,11 @@ Only answer the user's request.
 Do not end responses with lines like "Human interaction complete",
 "Awaiting further instructions", or similar unless the user specifically asks.
 Keep responses concise unless more detail is requested.
+
+When an image is provided, treat the current image as the source of truth.
+Ignore previous descriptions of screens, computers, operating systems, or visual content.
+Do not infer the current screen from conversation history.
+Describe only what is actually visible in the current image.
 `,
   },
 
